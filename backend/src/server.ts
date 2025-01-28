@@ -3,10 +3,8 @@ import cors from "cors";
 import dotenv from "dotenv";
 import fs from "fs";
 import { RecursiveCharacterTextSplitter } from 'langchain/text_splitter';
-//@ts-ignore
-import { SupabaseVectorStore } from 'langchain/vectorstores/supabase'
-//@ts-ignore
-import { OpenAIEmbeddings } from 'langchain/embeddings/openai'
+import { SupabaseVectorStore } from "@langchain/community/vectorstores/supabase";
+import { OpenAIEmbeddings } from "@langchain/openai";
 import { createClient } from '@supabase/supabase-js'
 
 dotenv.config();
@@ -49,10 +47,7 @@ const allowedOrigins = [
     const filePath = "./src/data/scrimba.txt";
     const textFromTheScrimbaDocument = fs.readFileSync(filePath,"utf-8");
 
-    const splitter = new RecursiveCharacterTextSplitter({
-        chunkSize: 500
-      })
-      const splittter = new RecursiveCharacterTextSplitter({
+      const splitter = new RecursiveCharacterTextSplitter({
         chunkSize: 500,
         separators: ['\n\n', '\n', ' ', ''], // default setting
         chunkOverlap: 50
@@ -71,7 +66,7 @@ const allowedOrigins = [
       
       const outputMessage = await SupabaseVectorStore.fromDocuments(
         chunkedText,
-          new OpenAIEmbeddings({ openAIApiKey }),
+          new OpenAIEmbeddings({ openAIApiKey:openAIApiKey }),
           {
              client,
              tableName: 'documents',

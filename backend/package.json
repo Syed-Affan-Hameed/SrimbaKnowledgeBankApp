@@ -12,6 +12,9 @@
   "license": "ISC",
   "description": "",
   "dependencies": {
+    "@langchain/community": "^0.3.26",
+    "@langchain/core": "^0.3.32",
+    "@langchain/openai": "^0.3.17",
     "@supabase/supabase-js": "^2.48.0",
     "cors": "^2.8.5",
     "dotenv": "^16.4.7",
