@@ -4,11 +4,12 @@ import dotenv from "dotenv";
 import fs from "fs";
 import { RecursiveCharacterTextSplitter } from "langchain/text_splitter";
 import { SupabaseVectorStore } from "@langchain/community/vectorstores/supabase";
-import { OpenAIEmbeddings } from "@langchain/openai";
+import { messageToOpenAIRole, OpenAIEmbeddings } from "@langchain/openai";
 import { createClient } from "@supabase/supabase-js";
 import { ChatOpenAI } from "@langchain/openai";
 import { StringOutputParser } from "@langchain/core/output_parsers";
 import { ChatPromptTemplate } from "@langchain/core/prompts";
+import { RunnableSequence,RunnablePassthrough } from "@langchain/core/runnables";
 dotenv.config();
 const app = express();
 
@@ -154,3 +155,61 @@ apologise if it doesn't know the answer and advise the
 
   return response;
 }
+
+app.post("/translateSentence", async (req, res) => {
+
+  const userSentence = req.body.userSentence;
+  const translationLanguage = req.body.translationLanguage;
+
+  const translatedSentence = await translateSentence(userSentence,translationLanguage);
+
+  res.send({message:"Translation successful",
+    Translated_Sentence:translatedSentence});
+});
+
+ const translateSentence = async (userSentence: string, translationLanguage:string) => {
+
+  const llmModel= new ChatOpenAI({
+    model: "gpt-3.5-turbo",
+    temperature: 0,
+    openAIApiKey: process.env.OPENAI_API_KEY
+  }
+  )
+
+  const punctuationTemplate = "Correct the punctuation mistakes in this sentence: {sentence}";
+
+  const punctuationPrompt = ChatPromptTemplate.fromTemplate(punctuationTemplate);
+
+  const punctuationChain = punctuationPrompt.pipe(llmModel).pipe(new StringOutputParser());
+
+  const grammerTemplate ="Correct the grammar mistakes in this sentence: {punctuatedSentence}";
+
+  const grammerPrompt = ChatPromptTemplate.fromTemplate(grammerTemplate);
+
+  const grammerChain = grammerPrompt.pipe(llmModel).pipe(new StringOutputParser());
+
+  const translationTemplate = "Translate this sentence to {language}: {grammaticallyCorrectedSentence}";
+
+  const translationPrompt = ChatPromptTemplate.fromTemplate(translationTemplate);
+
+  const translationChain = translationPrompt.pipe(llmModel).pipe(new StringOutputParser());
+
+  const mainChain = RunnableSequence.from([{
+    punctuatedSentence : punctuationChain,
+    user_Input  : new RunnablePassthrough()
+  },{
+    grammaticallyCorrectedSentence : grammerChain,
+    language : input => input.user_Input.language
+  },
+  translationChain
+]);
+
+const response = await mainChain.invoke({sentence:userSentence,language:translationLanguage});
+
+console.log(response);
+
+
+return response;
+}
+
+
