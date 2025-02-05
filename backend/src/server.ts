@@ -97,12 +97,12 @@ app.get("/getProductDesc", async (req, res) => {
   res.send(response);
 });
 
-app.get("/generateStandaloneQuestion", async (req, res) => {
+app.get("/generateStandaloneQuestionAndRetrieveEmbeddings", async (req, res) => {
   const userPrompt = req.body.userPrompt;
   const llmModel = new ChatOpenAI({
     model: "gpt-3.5-turbo",
     temperature: 0,
-    openAIApiKey: process.env.OPENAI_API_KEY,
+    openAIApiKey: process.env.OPENAI_API_KEY
   });
 
   //creating client for supabase
@@ -117,7 +117,7 @@ app.get("/generateStandaloneQuestion", async (req, res) => {
   const vectorStore = new SupabaseVectorStore(embeddingClassInstance,{client,tableName:"documents",queryName:"match_documents"});
 
   const retriever = vectorStore.asRetriever();
-  
+
   const standaloneQuestionTemplate =
     "Generate a standalone question from this user-Prompt: {userPrompt}";
 
@@ -125,15 +125,32 @@ app.get("/generateStandaloneQuestion", async (req, res) => {
     standaloneQuestionTemplate
   );
 
-  const standaloneQuestionChain = standaloneQuestionPrompt
+  const Chain = standaloneQuestionPrompt
     .pipe(llmModel)
-    .pipe(new StringOutputParser());
+    .pipe(new StringOutputParser()).pipe(retriever);
 
-  const response = await standaloneQuestionChain.invoke({
+  const response = await Chain.invoke({
     userPrompt: userPrompt,
   });
+
+  const context = response[0].pageContent;
 
   console.log(response);
 
   res.send(response);
 });
+
+
+const getAnswerForOrignialQuestion = async (userQuestion: string, llm: ChatOpenAI, context: string): Promise<any> => {
+  const anserForOriginalQuestionTemplate = `Generate an answer for this user question: {userQuestion} for the given context: {context} remeber the rules   - be friendly only answer from the context provided and never make up answers
+apologise if it doesn't know the answer and advise the 
+  user to email help@scrimba.com`;
+
+  const answerPrompt = ChatPromptTemplate.fromTemplate(anserForOriginalQuestionTemplate);
+
+  const chain = answerPrompt.pipe(llm).pipe(new StringOutputParser());
+
+  const response = chain.invoke({ userQuestion, context });
+
+  return response;
+}
