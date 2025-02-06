@@ -9,7 +9,10 @@ import { createClient } from "@supabase/supabase-js";
 import { ChatOpenAI } from "@langchain/openai";
 import { StringOutputParser } from "@langchain/core/output_parsers";
 import { ChatPromptTemplate } from "@langchain/core/prompts";
-import { RunnableSequence,RunnablePassthrough } from "@langchain/core/runnables";
+import {
+  RunnableSequence,
+  RunnablePassthrough,
+} from "@langchain/core/runnables";
 dotenv.config();
 const app = express();
 
@@ -98,118 +101,205 @@ app.get("/getProductDesc", async (req, res) => {
   res.send(response);
 });
 
-app.get("/generateStandaloneQuestionAndRetrieveEmbeddings", async (req, res) => {
-  const userPrompt = req.body.userPrompt;
+app.get(
+  "/generateStandaloneQuestionAndRetrieveEmbeddings",
+  async (req, res) => {
+    const userPrompt = req.body.userPrompt;
+    const llmModel = new ChatOpenAI({
+      model: "gpt-3.5-turbo",
+      temperature: 0,
+      openAIApiKey: process.env.OPENAI_API_KEY,
+    });
+
+    //creating client for supabase
+    const supabaseApiKey = process.env.SUPABASE_API_KEY;
+    const supabaseUrl = process.env.SUPABASE_URL;
+    const openAIApiKey = process.env.OPENAI_API_KEY;
+    const embeddingClassInstance = new OpenAIEmbeddings({
+      openAIApiKey: openAIApiKey,
+    });
+    const client = createClient(supabaseUrl!, supabaseApiKey!);
+
+    // setting up the supabase vector store as retriever
+
+    const vectorStore = new SupabaseVectorStore(embeddingClassInstance, {
+      client,
+      tableName: "documents",
+      queryName: "match_documents",
+    });
+
+    const retriever = vectorStore.asRetriever();
+
+    const standaloneQuestionTemplate =
+      "Generate a standalone question from this user-Prompt: {userPrompt}";
+
+    const standaloneQuestionPrompt = ChatPromptTemplate.fromTemplate(
+      standaloneQuestionTemplate
+    );
+
+    // this will retrieve the nearest matching vectors from the supabase
+    const Chain = standaloneQuestionPrompt
+      .pipe(llmModel)
+      .pipe(new StringOutputParser())
+      .pipe(retriever);
+
+    const response = await Chain.invoke({
+      userPrompt: userPrompt,
+    });
+
+    const context = response[0].pageContent;
+
+    console.log(response);
+
+    res.send(response);
+  }
+);
+
+app.post("/translateSentence", async (req, res) => {
+  const userSentence = req.body.userSentence;
+  const translationLanguage = req.body.translationLanguage;
+  try {
+    const translatedSentence = await translateSentence(
+      userSentence,
+      translationLanguage
+    );
+
+    res.send({
+      message: "Translation successfull",
+      Translated_Sentence: translatedSentence,
+    });
+  } catch (error: any) {
+    res
+      .status(500)
+      .send({ message: "Translation failed", error: error.message });
+    return;
+  }
+});
+
+const translateSentence = async (
+  userSentence: string,
+  translationLanguage: string
+) => {
+  const llmModel = new ChatOpenAI({
+    model: "gpt-4",
+    temperature: 0,
+    openAIApiKey: process.env.OPENAI_API_KEY,
+  });
+
+  const punctuationTemplate = `Given a sentence, add punctuation where needed. 
+    sentence: {sentence}
+    sentence with punctuation:  
+    `
+const punctuationPrompt = ChatPromptTemplate.fromTemplate(punctuationTemplate)
+
+const grammarTemplate = `Given a sentence correct the grammar.
+    sentence: {punctuated_sentence}
+    sentence with correct grammar: 
+    `
+const grammarPrompt = ChatPromptTemplate.fromTemplate(grammarTemplate)
+
+const translationTemplate = `Given a sentence, translate that sentence into {language}
+    sentence: {grammatically_correct_sentence}
+    translated sentence:
+    `
+const translationPrompt = ChatPromptTemplate.fromTemplate(translationTemplate)
+
+// const punctuationChain = RunnableSequence.from([
+//     punctuationPrompt,
+//     llmModel,
+//     new StringOutputParser()
+// ])
+// const grammarChain = RunnableSequence.from([
+//     grammarPrompt,
+//     llmModel,
+//     new StringOutputParser()
+// ])
+// const translationChain = RunnableSequence.from([
+//     translationPrompt,
+//     llmModel,
+//     new StringOutputParser()
+// ])
+
+const punctuationChain = punctuationPrompt.pipe(llmModel).pipe(new StringOutputParser())
+const grammarChain = grammarPrompt.pipe(llmModel).pipe(new StringOutputParser())
+const translationChain = translationPrompt.pipe(llmModel).pipe(new StringOutputParser())
+const chain = RunnableSequence.from([
+    {
+        punctuated_sentence: punctuationChain,
+        original_input: new RunnablePassthrough()
+    },
+    {
+        grammatically_correct_sentence: grammarChain,
+        language:  input  => input.original_input.language
+    },
+    translationChain
+])
+
+const response = await chain.invoke({
+    sentence: userSentence,
+    language: translationLanguage
+})
+
+console.log(response)
+
+  return response;
+};
+
+app.post("/srimbaBot", async (req, res) => {
+
+  const originalQuestion = req.body.userQuestion;
+
   const llmModel = new ChatOpenAI({
     model: "gpt-3.5-turbo",
     temperature: 0,
-    openAIApiKey: process.env.OPENAI_API_KEY
+    openAIApiKey: process.env.OPENAI_API_KEY,
   });
 
-  //creating client for supabase
   const supabaseApiKey = process.env.SUPABASE_API_KEY;
   const supabaseUrl = process.env.SUPABASE_URL;
   const openAIApiKey = process.env.OPENAI_API_KEY;
-  const embeddingClassInstance = new OpenAIEmbeddings({openAIApiKey: openAIApiKey});
-  const client = createClient(supabaseUrl!, supabaseApiKey!);
+  const embeddingClassInstance = new OpenAIEmbeddings({
+    openAIApiKey: openAIApiKey,
+  });
 
-  // setting up the supabase vector store as retriever
-
-  const vectorStore = new SupabaseVectorStore(embeddingClassInstance,{client,tableName:"documents",queryName:"match_documents"});
+  const supabaseClient = createClient(supabaseUrl!, supabaseApiKey!);
+  const vectorStore = new SupabaseVectorStore(embeddingClassInstance,{client:supabaseClient,tableName: "documents","queryName": "match_documents"});
 
   const retriever = vectorStore.asRetriever();
 
-  const standaloneQuestionTemplate =
-    "Generate a standalone question from this user-Prompt: {userPrompt}";
+  const standaloneQuestionTemplate = `Generate a standalone question from this user-Prompt: {originalQuestion}`;
 
-  const standaloneQuestionPrompt = ChatPromptTemplate.fromTemplate(
-    standaloneQuestionTemplate
-  );
+  const standaloneQuestionPrompt = ChatPromptTemplate.fromTemplate(standaloneQuestionTemplate);
 
-  const Chain = standaloneQuestionPrompt
-    .pipe(llmModel)
-    .pipe(new StringOutputParser()).pipe(retriever);
+  const contextArrayChain = standaloneQuestionPrompt.pipe(llmModel).pipe(new StringOutputParser()).pipe(retriever);
 
-  const response = await Chain.invoke({
-    userPrompt: userPrompt,
+const response = await contextArrayChain.invoke({originalQuestion});  
+
+const consolidatedContext = response.map((context) => context.pageContent).join(" ");
+
+const answer = await getAnswerForOrignialQuestion(originalQuestion,llmModel,consolidatedContext);
+
+console.log(answer);
+
+res.send(answer);
   });
 
-  const context = response[0].pageContent;
-
-  console.log(response);
-
-  res.send(response);
-});
-
-
-const getAnswerForOrignialQuestion = async (userQuestion: string, llm: ChatOpenAI, context: string): Promise<any> => {
-  const anserForOriginalQuestionTemplate = `Generate an answer for this user question: {userQuestion} for the given context: {context} remeber the rules   - be friendly only answer from the context provided and never make up answers
-apologise if it doesn't know the answer and advise the 
-  user to email help@scrimba.com`;
-
-  const answerPrompt = ChatPromptTemplate.fromTemplate(anserForOriginalQuestionTemplate);
-
-  const chain = answerPrompt.pipe(llm).pipe(new StringOutputParser());
-
-  const response = chain.invoke({ userQuestion, context });
-
-  return response;
-}
-
-app.post("/translateSentence", async (req, res) => {
-
-  const userSentence = req.body.userSentence;
-  const translationLanguage = req.body.translationLanguage;
-
-  const translatedSentence = await translateSentence(userSentence,translationLanguage);
-
-  res.send({message:"Translation successful",
-    Translated_Sentence:translatedSentence});
-});
-
- const translateSentence = async (userSentence: string, translationLanguage:string) => {
-
-  const llmModel= new ChatOpenAI({
-    model: "gpt-3.5-turbo",
-    temperature: 0,
-    openAIApiKey: process.env.OPENAI_API_KEY
-  }
-  )
-
-  const punctuationTemplate = "Correct the punctuation mistakes in this sentence: {sentence}";
-
-  const punctuationPrompt = ChatPromptTemplate.fromTemplate(punctuationTemplate);
-
-  const punctuationChain = punctuationPrompt.pipe(llmModel).pipe(new StringOutputParser());
-
-  const grammerTemplate ="Correct the grammar mistakes in this sentence: {punctuatedSentence}";
-
-  const grammerPrompt = ChatPromptTemplate.fromTemplate(grammerTemplate);
-
-  const grammerChain = grammerPrompt.pipe(llmModel).pipe(new StringOutputParser());
-
-  const translationTemplate = "Translate this sentence to {language}: {grammaticallyCorrectedSentence}";
-
-  const translationPrompt = ChatPromptTemplate.fromTemplate(translationTemplate);
-
-  const translationChain = translationPrompt.pipe(llmModel).pipe(new StringOutputParser());
-
-  const mainChain = RunnableSequence.from([{
-    punctuatedSentence : punctuationChain,
-    user_Input  : new RunnablePassthrough()
-  },{
-    grammaticallyCorrectedSentence : grammerChain,
-    language : input => input.user_Input.language
-  },
-  translationChain
-]);
-
-const response = await mainChain.invoke({sentence:userSentence,language:translationLanguage});
-
-console.log(response);
-
-
-return response;
-}
-
-
+  const getAnswerForOrignialQuestion = async (
+    userQuestion: string,
+    llm: ChatOpenAI,
+    context: string
+  ): Promise<any> => {
+    const anserForOriginalQuestionTemplate = `Generate an answer for this user question: {userQuestion} for the given context: {context} remeber the rules   - be friendly only answer from the context provided and never make up answers
+  apologise if it doesn't know the answer and advise the 
+    user to email help@scrimba.com`;
+  
+    const answerPrompt = ChatPromptTemplate.fromTemplate(
+      anserForOriginalQuestionTemplate
+    );
+  
+    const chain = answerPrompt.pipe(llm).pipe(new StringOutputParser());
+  
+    const response = chain.invoke({ userQuestion, context });
+  
+    return response;
+  };
