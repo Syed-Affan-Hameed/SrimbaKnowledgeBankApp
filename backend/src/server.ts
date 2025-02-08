@@ -13,6 +13,7 @@ import {
   RunnableSequence,
   RunnablePassthrough,
 } from "@langchain/core/runnables";
+import { getAnswerForOrignialQuestion } from "./utils/conversationHistoryHandler.js";
 dotenv.config();
 const app = express();
 
@@ -284,29 +285,6 @@ console.log(answer);
 res.send(answer);
   });
 
-  const getAnswerForOrignialQuestion = async (
-    userQuestion: string,
-    llm: ChatOpenAI,
-    context: string
-  ): Promise<any> => {
-    const anserForOriginalQuestionTemplate = `Generate an answer for this user question: {userQuestion} for the given context: {context} remeber the rules   - be friendly only answer from the context provided and never make up answers
-  apologise if it doesn't know the answer and advise the 
-    user to email help@scrimba.com`;
-  
-    const answerPrompt = ChatPromptTemplate.fromTemplate(
-      anserForOriginalQuestionTemplate
-    );
-  
-    const chain = answerPrompt.pipe(llm).pipe(new StringOutputParser());
-  
-    const response = chain.invoke({ userQuestion, context });
-  
-    return response;
-  };
-
-
-
-
 
   app.post("/srimbaBotWithConvHistory", async (req, res) => {
 
@@ -345,7 +323,7 @@ res.send(answer);
   console.log(answer);
   
   res.send(answer);
-  
+
     });
   
     const getAnswerForOrignialQuestionWithcoversationHistory = async (
