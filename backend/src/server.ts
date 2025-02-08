@@ -303,3 +303,67 @@ res.send(answer);
   
     return response;
   };
+
+
+
+
+
+  app.post("/srimbaBotWithConvHistory", async (req, res) => {
+
+    const originalQuestion = req.body.userQuestion;
+  
+    const llmModel = new ChatOpenAI({
+      model: "gpt-3.5-turbo",
+      temperature: 0,
+      openAIApiKey: process.env.OPENAI_API_KEY,
+    });
+  
+    const supabaseApiKey = process.env.SUPABASE_API_KEY;
+    const supabaseUrl = process.env.SUPABASE_URL;
+    const openAIApiKey = process.env.OPENAI_API_KEY;
+    const embeddingClassInstance = new OpenAIEmbeddings({
+      openAIApiKey: openAIApiKey,
+    });
+  
+    const supabaseClient = createClient(supabaseUrl!, supabaseApiKey!);
+    const vectorStore = new SupabaseVectorStore(embeddingClassInstance,{client:supabaseClient,tableName: "documents","queryName": "match_documents"});
+  
+    const retriever = vectorStore.asRetriever();
+  
+    const standaloneQuestionTemplate = `Generate a standalone question from this user-Prompt: {originalQuestion}`;
+  
+    const standaloneQuestionPrompt = ChatPromptTemplate.fromTemplate(standaloneQuestionTemplate);
+  
+    const contextArrayChain = standaloneQuestionPrompt.pipe(llmModel).pipe(new StringOutputParser()).pipe(retriever);
+  
+  const response = await contextArrayChain.invoke({originalQuestion});  
+  
+  const consolidatedContext = response.map((context) => context.pageContent).join(" ");
+  
+  const answer = await getAnswerForOrignialQuestion(originalQuestion,llmModel,consolidatedContext);
+  
+  console.log(answer);
+  
+  res.send(answer);
+  
+    });
+  
+    const getAnswerForOrignialQuestionWithcoversationHistory = async (
+      userQuestion: string,
+      llm: ChatOpenAI,
+      context: string
+    ): Promise<any> => {
+      const anserForOriginalQuestionTemplate = `Generate an answer for this user question: {userQuestion} for the given context: {context} remeber the rules   - be friendly only answer from the context provided and never make up answers
+    apologise if it doesn't know the answer and advise the 
+      user to email help@scrimba.com`;
+    
+      const answerPrompt = ChatPromptTemplate.fromTemplate(
+        anserForOriginalQuestionTemplate
+      );
+    
+      const chain = answerPrompt.pipe(llm).pipe(new StringOutputParser());
+    
+      const response = chain.invoke({ userQuestion, context });
+    
+      return response;
+    };
