@@ -4,7 +4,7 @@ import dotenv from "dotenv";
 import fs from "fs";
 import { RecursiveCharacterTextSplitter } from "langchain/text_splitter";
 import { SupabaseVectorStore } from "@langchain/community/vectorstores/supabase";
-import { messageToOpenAIRole, OpenAIEmbeddings } from "@langchain/openai";
+import { OpenAIEmbeddings } from "@langchain/openai";
 import { createClient } from "@supabase/supabase-js";
 import { ChatOpenAI } from "@langchain/openai";
 import { StringOutputParser } from "@langchain/core/output_parsers";
@@ -13,7 +13,11 @@ import {
   RunnableSequence,
   RunnablePassthrough,
 } from "@langchain/core/runnables";
-import { getAnswerForOrignialQuestion } from "./utils/conversationHistoryHandler.js";
+import {
+  conversationHistory,
+  getAnswerForOrignialQuestion,
+  getAnswerForOrignialQuestionWithConversationHistory,
+} from "./utils/conversationHistoryHandler.js";
 dotenv.config();
 const app = express();
 
@@ -190,64 +194,71 @@ const translateSentence = async (
   const punctuationTemplate = `Given a sentence, add punctuation where needed. 
     sentence: {sentence}
     sentence with punctuation:  
-    `
-const punctuationPrompt = ChatPromptTemplate.fromTemplate(punctuationTemplate)
+    `;
+  const punctuationPrompt =
+    ChatPromptTemplate.fromTemplate(punctuationTemplate);
 
-const grammarTemplate = `Given a sentence correct the grammar.
+  const grammarTemplate = `Given a sentence correct the grammar.
     sentence: {punctuated_sentence}
     sentence with correct grammar: 
-    `
-const grammarPrompt = ChatPromptTemplate.fromTemplate(grammarTemplate)
+    `;
+  const grammarPrompt = ChatPromptTemplate.fromTemplate(grammarTemplate);
 
-const translationTemplate = `Given a sentence, translate that sentence into {language}
+  const translationTemplate = `Given a sentence, translate that sentence into {language}
     sentence: {grammatically_correct_sentence}
     translated sentence:
-    `
-const translationPrompt = ChatPromptTemplate.fromTemplate(translationTemplate)
+    `;
+  const translationPrompt =
+    ChatPromptTemplate.fromTemplate(translationTemplate);
 
-// const punctuationChain = RunnableSequence.from([
-//     punctuationPrompt,
-//     llmModel,
-//     new StringOutputParser()
-// ])
-// const grammarChain = RunnableSequence.from([
-//     grammarPrompt,
-//     llmModel,
-//     new StringOutputParser()
-// ])
-// const translationChain = RunnableSequence.from([
-//     translationPrompt,
-//     llmModel,
-//     new StringOutputParser()
-// ])
+  // const punctuationChain = RunnableSequence.from([
+  //     punctuationPrompt,
+  //     llmModel,
+  //     new StringOutputParser()
+  // ])
+  // const grammarChain = RunnableSequence.from([
+  //     grammarPrompt,
+  //     llmModel,
+  //     new StringOutputParser()
+  // ])
+  // const translationChain = RunnableSequence.from([
+  //     translationPrompt,
+  //     llmModel,
+  //     new StringOutputParser()
+  // ])
 
-const punctuationChain = punctuationPrompt.pipe(llmModel).pipe(new StringOutputParser())
-const grammarChain = grammarPrompt.pipe(llmModel).pipe(new StringOutputParser())
-const translationChain = translationPrompt.pipe(llmModel).pipe(new StringOutputParser())
-const chain = RunnableSequence.from([
+  const punctuationChain = punctuationPrompt
+    .pipe(llmModel)
+    .pipe(new StringOutputParser());
+  const grammarChain = grammarPrompt
+    .pipe(llmModel)
+    .pipe(new StringOutputParser());
+  const translationChain = translationPrompt
+    .pipe(llmModel)
+    .pipe(new StringOutputParser());
+  const chain = RunnableSequence.from([
     {
-        punctuated_sentence: punctuationChain,
-        original_input: new RunnablePassthrough()
+      punctuated_sentence: punctuationChain,
+      original_input: new RunnablePassthrough(),
     },
     {
-        grammatically_correct_sentence: grammarChain,
-        language:  input  => input.original_input.language
+      grammatically_correct_sentence: grammarChain,
+      language: (input) => input.original_input.language,
     },
-    translationChain
-])
+    translationChain,
+  ]);
 
-const response = await chain.invoke({
+  const response = await chain.invoke({
     sentence: userSentence,
-    language: translationLanguage
-})
+    language: translationLanguage,
+  });
 
-console.log(response)
+  console.log(response);
 
   return response;
 };
 
 app.post("/srimbaBot", async (req, res) => {
-
   const originalQuestion = req.body.userQuestion;
 
   const llmModel = new ChatOpenAI({
@@ -264,84 +275,111 @@ app.post("/srimbaBot", async (req, res) => {
   });
 
   const supabaseClient = createClient(supabaseUrl!, supabaseApiKey!);
-  const vectorStore = new SupabaseVectorStore(embeddingClassInstance,{client:supabaseClient,tableName: "documents","queryName": "match_documents"});
+  const vectorStore = new SupabaseVectorStore(embeddingClassInstance, {
+    client: supabaseClient,
+    tableName: "documents",
+    queryName: "match_documents",
+  });
 
   const retriever = vectorStore.asRetriever();
 
   const standaloneQuestionTemplate = `Generate a standalone question from this user-Prompt: {originalQuestion}`;
 
-  const standaloneQuestionPrompt = ChatPromptTemplate.fromTemplate(standaloneQuestionTemplate);
+  const standaloneQuestionPrompt = ChatPromptTemplate.fromTemplate(
+    standaloneQuestionTemplate
+  );
 
-  const contextArrayChain = standaloneQuestionPrompt.pipe(llmModel).pipe(new StringOutputParser()).pipe(retriever);
+  const contextArrayChain = standaloneQuestionPrompt
+    .pipe(llmModel)
+    .pipe(new StringOutputParser())
+    .pipe(retriever);
 
-const response = await contextArrayChain.invoke({originalQuestion});  
+  const response = await contextArrayChain.invoke({ originalQuestion });
 
-const consolidatedContext = response.map((context) => context.pageContent).join(" ");
+  const consolidatedContext = response
+    .map((context) => context.pageContent)
+    .join(" ");
 
-const answer = await getAnswerForOrignialQuestion(originalQuestion,llmModel,consolidatedContext);
+  const answer = await getAnswerForOrignialQuestion(
+    originalQuestion,
+    llmModel,
+    consolidatedContext
+  );
 
-console.log(answer);
+  console.log(answer);
 
-res.send(answer);
+  res.send(answer);
+});
+
+app.post("/srimbaBotWithConversationHistory", async (req, res) => {
+
+  const originalQuestion = req.body.userQuestion;
+
+  conversationHistory.push({
+    sender: "user",
+    message: originalQuestion,
+  });
+  let conversationHistoryUserString = JSON.stringify(conversationHistory);
+
+  const llmModel = new ChatOpenAI({
+    model: "gpt-3.5-turbo",
+    temperature: 0,
+    openAIApiKey: process.env.OPENAI_API_KEY,
   });
 
+  const supabaseApiKey = process.env.SUPABASE_API_KEY;
+  const supabaseUrl = process.env.SUPABASE_URL;
+  const openAIApiKey = process.env.OPENAI_API_KEY;
+  const embeddingClassInstance = new OpenAIEmbeddings({
+    openAIApiKey: openAIApiKey,
+  });
 
-  app.post("/srimbaBotWithConvHistory", async (req, res) => {
+  const supabaseClient = createClient(supabaseUrl!, supabaseApiKey!);
+  const vectorStore = new SupabaseVectorStore(embeddingClassInstance, {
+    client: supabaseClient,
+    tableName: "documents",
+    queryName: "match_documents",
+  });
 
-    const originalQuestion = req.body.userQuestion;
-  
-    const llmModel = new ChatOpenAI({
-      model: "gpt-3.5-turbo",
-      temperature: 0,
-      openAIApiKey: process.env.OPENAI_API_KEY,
-    });
-  
-    const supabaseApiKey = process.env.SUPABASE_API_KEY;
-    const supabaseUrl = process.env.SUPABASE_URL;
-    const openAIApiKey = process.env.OPENAI_API_KEY;
-    const embeddingClassInstance = new OpenAIEmbeddings({
-      openAIApiKey: openAIApiKey,
-    });
-  
-    const supabaseClient = createClient(supabaseUrl!, supabaseApiKey!);
-    const vectorStore = new SupabaseVectorStore(embeddingClassInstance,{client:supabaseClient,tableName: "documents","queryName": "match_documents"});
-  
-    const retriever = vectorStore.asRetriever();
-  
-    const standaloneQuestionTemplate = `Generate a standalone question from this user-Prompt: {originalQuestion}`;
-  
-    const standaloneQuestionPrompt = ChatPromptTemplate.fromTemplate(standaloneQuestionTemplate);
-  
-    const contextArrayChain = standaloneQuestionPrompt.pipe(llmModel).pipe(new StringOutputParser()).pipe(retriever);
-  
-  const response = await contextArrayChain.invoke({originalQuestion});  
-  
-  const consolidatedContext = response.map((context) => context.pageContent).join(" ");
-  
-  const answer = await getAnswerForOrignialQuestion(originalQuestion,llmModel,consolidatedContext);
+  const retriever = vectorStore.asRetriever();
+
+  const standaloneQuestionTemplate = `Given some conversation history (if any) and a question, convert the question to a standalone question. 
+conversation history: {conversationHistory}
+question: {originalQuestion} 
+standalone question:`;
+
+  const standaloneQuestionPrompt = ChatPromptTemplate.fromTemplate(
+    standaloneQuestionTemplate
+  );
+
+  const contextArrayChain = standaloneQuestionPrompt
+    .pipe(llmModel)
+    .pipe(new StringOutputParser())
+    .pipe(retriever);
+
+  const response = await contextArrayChain.invoke({
+    originalQuestion,
+    conversationHistory: conversationHistoryUserString,
+  });
+
+  const consolidatedContext = response
+    .map((context) => context.pageContent)
+    .join(" ");
+
+  const answer = await getAnswerForOrignialQuestionWithConversationHistory(
+    originalQuestion,
+    llmModel,
+    consolidatedContext,
+    conversationHistory
+  );
+
+  conversationHistory.push({
+    sender: "AI-bot",
+    message: answer,
+  });
+
   
   console.log(answer);
-  
-  res.send(answer);
 
-    });
-  
-    const getAnswerForOrignialQuestionWithcoversationHistory = async (
-      userQuestion: string,
-      llm: ChatOpenAI,
-      context: string
-    ): Promise<any> => {
-      const anserForOriginalQuestionTemplate = `Generate an answer for this user question: {userQuestion} for the given context: {context} remeber the rules   - be friendly only answer from the context provided and never make up answers
-    apologise if it doesn't know the answer and advise the 
-      user to email help@scrimba.com`;
-    
-      const answerPrompt = ChatPromptTemplate.fromTemplate(
-        anserForOriginalQuestionTemplate
-      );
-    
-      const chain = answerPrompt.pipe(llm).pipe(new StringOutputParser());
-    
-      const response = chain.invoke({ userQuestion, context });
-    
-      return response;
-    };
+  res.send(answer);
+});
